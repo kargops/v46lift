@@ -282,7 +282,8 @@ func extractZip(zr *zip.Reader, dest string) error {
 			return fmt.Errorf("invalid installer path %q", f.Name)
 		}
 		target := filepath.Join(dest, rel)
-		if !pathInside(target, dest) {
+		targetRel, err := filepath.Rel(dest, target)
+		if err != nil || targetRel == ".." || strings.HasPrefix(targetRel, ".."+string(os.PathSeparator)) {
 			return fmt.Errorf("invalid installer path %q", f.Name)
 		}
 		if f.FileInfo().IsDir() {
