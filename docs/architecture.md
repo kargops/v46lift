@@ -92,10 +92,10 @@ The launcher owns the application lifecycle; the daemon owns only networking.
 
 Minted installers currently approximate this without a daemon. The player-facing
 file is the original client path, replaced with a `v46lift` shim that already
-contains the mapping. The shim may hold `CAP_NET_ADMIN` on Linux so synthetic
-addresses can be added without sudo, then drops privilege before execing the
-preserved original client (`*.v46lift-real`). GOST is bundled beside the shim
-and is started only while the client runs.
+contains the mapping. On Linux the shim may hold `CAP_NET_ADMIN` and applies
+addresses in-process via netlink so the capability is not lost across `exec`.
+The parent keeps that capability until teardown; GOST and the original client
+(`*.v46lift-real`) are started unprivileged and do not inherit it.
 
 ## Packaging
 

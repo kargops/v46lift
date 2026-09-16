@@ -17,6 +17,7 @@ type Gost struct {
 	binary   string
 	mappings []config.PortMapping
 	logPath  string
+	setupCmd func(*exec.Cmd)
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
@@ -32,6 +33,11 @@ func NewGost(binary string, mappings []config.PortMapping) *Gost {
 
 func (g *Gost) WithLogPath(path string) *Gost {
 	g.logPath = path
+	return g
+}
+
+func (g *Gost) WithCommandSetup(fn func(*exec.Cmd)) *Gost {
+	g.setupCmd = fn
 	return g
 }
 
@@ -76,6 +82,9 @@ func (g *Gost) Start(ctx context.Context) error {
 
 	cmd := exec.CommandContext(ctx, g.binary, g.args()...)
 	cmd.Stdin = nil
+	if g.setupCmd != nil {
+		g.setupCmd(cmd)
+	}
 	if g.logPath != "" {
 		f, err := os.OpenFile(g.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err == nil {

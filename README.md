@@ -60,7 +60,7 @@ Pack flags:
 | `--output` | Path of the minted installer |
 | `--no-set-caps` | Linux: do not grant `CAP_NET_ADMIN` to the shim |
 
-On Linux, setup grants the shim `CAP_NET_ADMIN` so later game launches do not need `sudo`. Privileges are dropped before the game process starts. A hidden uninstall helper is written next to the lift files.
+On Linux, setup grants the shim `CAP_NET_ADMIN` so later game launches do not need `sudo`. Addresses are added and removed in-process via netlink so that capability is not lost by execing `ip`. The shim keeps it until teardown; GOST and the game start unprivileged and do not inherit it.
 
 ## MVP architecture
 

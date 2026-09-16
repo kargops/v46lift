@@ -9,11 +9,11 @@ import (
 	"strings"
 )
 
-func maybeElevate(need bool) error {
+func maybeElevate(need bool) (handedOff bool, err error) {
 	if !need || alreadyPrivileged() || os.Getenv("V46LIFT_ELEVATED") == "1" {
-		return nil
+		return false, nil
 	}
-	return reexecElevated()
+	return true, reexecElevated()
 }
 
 func reexecElevated() error {
@@ -40,14 +40,7 @@ func reexecElevated() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = env
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			os.Exit(ee.ExitCode())
-		}
-		return err
-	}
-	os.Exit(0)
-	return nil
+	return cmd.Run()
 }
 
 func unixElevate(self string, args []string) *exec.Cmd {

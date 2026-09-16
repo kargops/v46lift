@@ -1,9 +1,11 @@
 package privilege
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
 
-func TestDropIsBestEffort(t *testing.T) {
-	if err := Drop(); err != nil {
-		t.Fatalf("Drop should not fail for an unprivileged process: %v", err)
-	}
+func TestConfineNilCommand(t *testing.T) {
+	Confine(nil)
+	Confine(&exec.Cmd{})
 }

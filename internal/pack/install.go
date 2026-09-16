@@ -31,6 +31,16 @@ func InstallFromSelf(self string) error {
 		return fmt.Errorf("read installer payload: %w", err)
 	}
 
+	manifest, err := zipManifest(zr)
+	if err != nil {
+		return err
+	}
+
+	handedOff, err := maybeElevate(needsAdmin(manifest))
+	if handedOff {
+		return err
+	}
+
 	tmp, err := os.MkdirTemp("", "v46lift-install-*")
 	if err != nil {
 		return err
@@ -41,16 +51,8 @@ func InstallFromSelf(self string) error {
 		return err
 	}
 
-	manifest, err := readManifest(filepath.Join(tmp, "manifest.json"))
-	if err != nil {
-		return err
-	}
 	cfg, err := config.Load(filepath.Join(tmp, "config.json"))
 	if err != nil {
-		return err
-	}
-
-	if err := maybeElevate(needsAdmin(manifest)); err != nil {
 		return err
 	}
 
@@ -61,8 +63,16 @@ func Uninstall(cfg *config.Config) error {
 	if cfg == nil || cfg.Install == nil || cfg.Install.WrapPath == "" || cfg.Install.RealPath == "" {
 		return fmt.Errorf("this launcher has no install metadata; nothing to uninstall")
 	}
-	if err := maybeElevate(needsUninstallAdmin(cfg.Install)); err != nil {
+
+	handedOff, err := maybeElevate(needsUninstallAdmin(cfg.Install))
+	if handedOff {
 		return err
+	}
+
+	if cfg.Install.InstallDir != "" {
+		if err := moveSelfOutOfInstallDir(cfg.Install.InstallDir); err != nil {
+			return err
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Restoring original client at %s\n", cfg.Install.WrapPath)
@@ -184,12 +194,35 @@ func writeUninstallHelper(installDir, liftPath string) error {
 	return os.Chmod(path, 0755)
 }
 
-func readManifest(path string) (Manifest, error) {
-	var m Manifest
-	raw, err := os.ReadFile(path)
+func zipManifest(zr *zip.Reader) (Manifest, error) {
+	raw, err := zipReadFile(zr, "manifest.json")
 	if err != nil {
-		return m, fmt.Errorf("read manifest: %w", err)
+		return Manifest{}, err
 	}
+	return parseManifest(raw)
+}
+
+func zipReadFile(zr *zip.Reader, name string) ([]byte, error) {
+	for _, f := range zr.File {
+		if f.Name != name {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+	return nil, fmt.Errorf("installer payload missing %s", name)
+}
+
+func parseManifest(raw []byte) (Manifest, error) {
+	var m Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return m, fmt.Errorf("parse manifest: %w", err)
 	}
@@ -197,6 +230,45 @@ func readManifest(path string) (Manifest, error) {
 		return m, fmt.Errorf("installer manifest is incomplete")
 	}
 	return m, nil
+}
+
+func moveSelfOutOfInstallDir(installDir string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	self, err = filepath.Abs(self)
+	if err != nil {
+		return err
+	}
+	installDir, err = filepath.Abs(installDir)
+	if err != nil {
+		return err
+	}
+	if !pathInside(self, installDir) {
+		return nil
+	}
+
+	tmp, err := os.MkdirTemp("", "v46lift-uninstall-*")
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(tmp, filepath.Base(self))
+	if err := os.Rename(self, dest); err != nil {
+		_ = os.RemoveAll(tmp)
+		return fmt.Errorf("move uninstaller out of %s: %w", installDir, err)
+	}
+	return nil
+}
+
+func pathInside(path, dir string) bool {
+	path = filepath.Clean(path)
+	dir = filepath.Clean(dir)
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func extractZip(zr *zip.Reader, dest string) error {

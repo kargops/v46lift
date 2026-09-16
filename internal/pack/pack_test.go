@@ -266,7 +266,7 @@ func main() { fmt.Println("REAL_GAME") }
 		t.Fatal("preserved original client is empty")
 	}
 
-	un := exec.Command(wrap, "--v46lift-cli", "uninstall")
+	un := exec.Command(filepath.Join(installDir, liftInstallName()), "--v46lift-cli", "uninstall")
 	unOut, err := un.CombinedOutput()
 	if err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, unOut)
@@ -280,6 +280,28 @@ func main() { fmt.Println("REAL_GAME") }
 	}
 	if info.Kind != payload.KindNone {
 		t.Fatalf("restored client still looks packed: %s", info.Kind)
+	}
+	if _, err := os.Stat(installDir); !os.IsNotExist(err) {
+		t.Fatalf("install dir should have been removed, err=%v", err)
+	}
+}
+
+func TestPathInside(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "opt", "v46lift", "app")
+	inside := filepath.Join(dir, "v46lift")
+	outside := filepath.Join(t.TempDir(), "other")
+	if !pathInside(inside, dir) {
+		t.Fatalf("%s should be inside %s", inside, dir)
+	}
+	if pathInside(outside, dir) {
+		t.Fatalf("%s should not be inside %s", outside, dir)
+	}
+}
+
+func TestMaybeElevateSkipped(t *testing.T) {
+	handedOff, err := maybeElevate(false)
+	if handedOff || err != nil {
+		t.Fatalf("handedOff=%v err=%v", handedOff, err)
 	}
 }
 

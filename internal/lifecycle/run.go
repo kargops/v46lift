@@ -22,14 +22,11 @@ func Run(ctx context.Context, cfg *config.Config, extraArgs []string) error {
 		_ = netmgr.Down(context.Background())
 	}()
 
-	if err := privilege.Drop(); err != nil {
-		return fmt.Errorf("drop privileges: %w", err)
-	}
-
 	var b backend.Backend
 	switch cfg.Engine.Type {
 	case "gost":
 		g := backend.NewGost(cfg.Engine.Binary, cfg.Mappings)
+		g.WithCommandSetup(privilege.Confine)
 		if cfg.Install != nil && cfg.Install.InstallDir != "" {
 			g.WithLogPath(filepath.Join(cfg.Install.InstallDir, "gost.log"))
 		}
@@ -51,6 +48,7 @@ func Run(ctx context.Context, cfg *config.Config, extraArgs []string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	privilege.Confine(cmd)
 	if cfg.Install != nil && cfg.Install.WrapPath != "" {
 		cmd.Args[0] = cfg.Install.WrapPath
 	}
