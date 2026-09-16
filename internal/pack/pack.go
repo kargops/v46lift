@@ -72,7 +72,7 @@ func BuildInstaller(opts Options) (string, error) {
 	opts.Output = ensureExeSuffix(opts.Output)
 
 	if strings.TrimSpace(opts.WrapPath) == "" {
-		return "", fmt.Errorf("wrap path is required (game.executable)")
+		return "", fmt.Errorf("wrap path is required: set game.executable or --wrap to the binary players actually launch (not the vendor setup program)")
 	}
 	if opts.GostBinary == "" {
 		return "", fmt.Errorf("a GOST binary is required to mint a seamless installer; pass --gost")

@@ -56,15 +56,13 @@ func Unwrap(wrapPath, realPath string) error {
 
 	if st, err := os.Stat(wrapPath); err == nil && !st.IsDir() {
 		info, inspectErr := payload.InspectFile(wrapPath)
+		if inspectErr == nil && info.Kind == payload.KindNone {
+			return fmt.Errorf("%s does not look like a v46lift launcher; leaving it untouched", wrapPath)
+		}
 		if inspectErr == nil && info.Kind == payload.KindLauncher {
-			if err := os.Remove(wrapPath); err != nil && !os.IsNotExist(err) {
-				if runtime.GOOS == "windows" {
-					return fmt.Errorf("could not remove launcher at %s while it is in use; close the game and retry", wrapPath)
-				}
+			if err := retireFile(wrapPath); err != nil {
 				return err
 			}
-		} else if inspectErr == nil && info.Kind == payload.KindNone {
-			return fmt.Errorf("%s does not look like a v46lift launcher; leaving it untouched", wrapPath)
 		}
 	}
 
@@ -73,6 +71,27 @@ func Unwrap(wrapPath, realPath string) error {
 	}
 	if err := os.Rename(realPath, wrapPath); err != nil {
 		return fmt.Errorf("restore original client: %w", err)
+	}
+	return nil
+}
+
+// retireFile moves path aside, then deletes the leftover copy if the OS allows it.
+// Windows cannot delete a running image, but it can rename one, which is how
+// uninstall works when invoked as `game.exe --v46lift-cli uninstall`.
+func retireFile(path string) error {
+	stale := path + ".v46lift-old"
+	_ = os.Remove(stale)
+	if err := os.Rename(path, stale); err != nil {
+		if rmErr := os.Remove(path); rmErr != nil {
+			if runtime.GOOS == "windows" {
+				return fmt.Errorf("could not remove launcher at %s while it is in use; close the game and retry", path)
+			}
+			return rmErr
+		}
+		return nil
+	}
+	if err := os.Remove(stale); err != nil && runtime.GOOS != "windows" {
+		return err
 	}
 	return nil
 }

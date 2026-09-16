@@ -38,7 +38,13 @@ go build -o ./bin/v46lift ./cmd/v46lift
 
 Give players `dist/legacy-game-setup` (or `legacy-game-setup.exe` on Windows). That is the only file they need.
 
-`game.executable` in the pack config is the path the vendor installer will produce. `v46lift pack` rewrites that internally to the preserved original (`game.v46lift-real`) and points the engine at the bundled GOST binary. Players are never asked to pass `--config`.
+`--installer` is only the vendor *setup* program. It is not how GOST starts. GOST is not a background watcher. After setup, `v46lift` replaces the player-facing client binary (`game.executable`, or `--wrap`) with a shim. Shortcuts keep pointing at that same path, so launching the game actually launches the shim:
+
+1. shim starts GOST
+2. shim starts the preserved original (`*.v46lift-real`)
+3. when that process exits, the shim stops GOST
+
+If pack does not know that launch path, it cannot intercept the game, and GOST will never start automatically. That path is baked into the installer; players never type it.
 
 Pack flags:
 
@@ -46,11 +52,11 @@ Pack flags:
 | --- | --- |
 | `--config` | Mapping and game path JSON |
 | `--gost` | GOST v3 binary to bundle |
-| `--installer` | Optional vendor client installer, run during setup |
+| `--installer` | Optional vendor *setup* program, run once during install |
 | `--name` | Short id used in install paths (`legacy-game`) |
 | `--display-name` | Name shown during setup |
 | `--install-dir` | Where lift + GOST are stored (default `/opt/v46lift/<name>`) |
-| `--wrap` | Client executable to replace (default `game.executable`) |
+| `--wrap` | Player-facing binary to intercept; starting it starts GOST (default `game.executable`) |
 | `--output` | Path of the minted installer |
 | `--no-set-caps` | Linux: do not grant `CAP_NET_ADMIN` to the shim |
 

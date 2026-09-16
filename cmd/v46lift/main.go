@@ -193,7 +193,7 @@ func runPack(args []string) error {
 	output := fs.String("output", "", "path of the minted installer")
 	liftBinary := fs.String("lift-binary", "", "v46lift binary to embed (default: this executable)")
 	installDir := fs.String("install-dir", "", "where lift files are installed on the target")
-	wrapPath := fs.String("wrap", "", "client executable replaced with the launcher (default: game.executable)")
+	wrapPath := fs.String("wrap", "", "player-facing binary to intercept; starting it starts GOST (default: game.executable)")
 	noSetCaps := fs.Bool("no-set-caps", false, "do not grant CAP_NET_ADMIN to the launcher")
 	gostNotice := fs.String("gost-notice", "", "optional GOST license notice file to bundle")
 	if err := fs.Parse(args); err != nil {
