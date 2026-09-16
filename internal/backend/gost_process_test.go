@@ -21,6 +21,36 @@ func writeExecutable(t *testing.T, contents string) string {
 	return path
 }
 
+func loopingScript(ready string) string {
+	return "#!/bin/sh\n: > " + ready + "\nwhile :; do sleep 1; done\n"
+}
+
+func waitReady(t *testing.T, g *Gost, ready string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			if g.cmd != nil && g.cmd.Process != nil {
+				_ = g.cmd.Process.Kill()
+			}
+			t.Fatal("fake gost did not become ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestWaitDoneReturnsOnTimeout(t *testing.T) {
+	done := make(chan struct{})
+	start := time.Now()
+	waitDone(done, 20*time.Millisecond)
+	if time.Since(start) > 200*time.Millisecond {
+		t.Fatal("waitDone did not bound its wait")
+	}
+}
+
 func TestGostWaitReportsUnexpectedExit(t *testing.T) {
 	g := NewGost(writeExecutable(t, "#!/bin/sh\nexit 17\n"), nil)
 	if err := g.Start(context.Background()); err != nil {
@@ -37,6 +67,38 @@ func TestGostWaitReportsUnexpectedExit(t *testing.T) {
 	}
 }
 
+func TestGostStartRejectedWhenContextAlreadyCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g := NewGost(writeExecutable(t, "#!/bin/sh\nexit 0\n"), nil)
+	if err := g.Start(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestGostSurvivesStartContextCancel(t *testing.T) {
+	ready := filepath.Join(t.TempDir(), "ready")
+	g := NewGost(writeExecutable(t, loopingScript(ready)), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := g.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitReady(t, g, ready)
+	cancel()
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer waitCancel()
+	if err := g.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("gost should keep running after Start context cancel, got %v", err)
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopCancel()
+	if err := g.Stop(stopCtx); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+}
+
 func TestGostStopKillsProcessAtDeadline(t *testing.T) {
 	ready := filepath.Join(t.TempDir(), "ready")
 	script := "#!/bin/sh\ntrap '' INT\n: > " + ready + "\nwhile :; do sleep 1; done\n"
@@ -44,17 +106,7 @@ func TestGostStopKillsProcessAtDeadline(t *testing.T) {
 	if err := g.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-
-	deadline := time.Now().Add(time.Second)
-	for {
-		if _, err := os.Stat(ready); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake gost did not become ready")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitReady(t, g, ready)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -74,11 +126,10 @@ func TestGostStopKillsProcessAtDeadline(t *testing.T) {
 
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
 	defer waitCancel()
-	if err := g.Wait(waitCtx); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			t.Fatalf("expected killed child exit status, got %v", err)
-		}
+	err := g.Wait(waitCtx)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected killed child exit status, got %v", err)
 	}
 
 	// A timed-out Stop still reaps the old child and must leave the backend
@@ -90,17 +141,7 @@ func TestGostStopKillsProcessAtDeadline(t *testing.T) {
 	if err := g.Start(context.Background()); err != nil {
 		t.Fatalf("restart after forced stop: %v", err)
 	}
-	deadline = time.Now().Add(time.Second)
-	for {
-		if _, err := os.Stat(ready); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			_ = g.cmd.Process.Kill()
-			t.Fatal("restarted fake gost did not become ready")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitReady(t, g, ready)
 	restartCtx, restartCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer restartCancel()
 	if err := g.Stop(restartCtx); !errors.Is(err, context.DeadlineExceeded) {

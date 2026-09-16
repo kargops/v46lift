@@ -9,9 +9,15 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kargops/v46lift/internal/config"
 )
+
+// forceKillWait is how long Stop waits for cmd.Wait after Kill. If the child
+// is stuck (for example in uninterruptible kernel I/O), Stop returns anyway
+// so callers can tear down the rest of the runtime.
+const forceKillWait = time.Second
 
 type Gost struct {
 	binary   string
@@ -75,6 +81,10 @@ func (g *Gost) CommandLine() string {
 }
 
 func (g *Gost) Start(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -82,7 +92,9 @@ func (g *Gost) Start(ctx context.Context) error {
 		return fmt.Errorf("gost backend already started")
 	}
 
-	cmd := exec.CommandContext(ctx, g.binary, g.args()...)
+	// Command, not CommandContext: Stop owns shutdown. Binding the child to
+	// the parent context would SIGKILL it on cancel and race graceful stop.
+	cmd := exec.Command(g.binary, g.args()...)
 	cmd.Stdin = nil
 	if g.setupCmd != nil {
 		g.setupCmd(cmd)
@@ -107,13 +119,16 @@ func (g *Gost) Start(ctx context.Context) error {
 		return fmt.Errorf("start gost: %w", err)
 	}
 	g.cmd = cmd
-	g.done = make(chan struct{})
+	done := make(chan struct{})
+	g.done = done
 	g.waitErr = nil
 	go func() {
 		err := cmd.Wait()
 		g.mu.Lock()
-		g.waitErr = err
-		close(g.done)
+		if g.cmd == cmd || g.cmd == nil {
+			g.waitErr = err
+		}
+		close(done)
 		g.mu.Unlock()
 	}()
 	return nil
@@ -122,9 +137,10 @@ func (g *Gost) Start(ctx context.Context) error {
 func (g *Gost) Wait(ctx context.Context) error {
 	g.mu.Lock()
 	done := g.done
+	waitErr := g.waitErr
 	g.mu.Unlock()
 	if done == nil {
-		return nil
+		return waitErr
 	}
 
 	select {
@@ -154,15 +170,24 @@ func (g *Gost) Stop(ctx context.Context) error {
 
 	select {
 	case <-done:
+		g.clearProcess(cmd)
+		return nil
 	case <-ctx.Done():
 		_ = cmd.Process.Kill()
-		<-done
-		g.clearProcess(cmd)
-		return fmt.Errorf("stop gost: %w", ctx.Err())
 	}
 
+	waitDone(done, forceKillWait)
 	g.clearProcess(cmd)
-	return nil
+	return fmt.Errorf("stop gost: %w", ctx.Err())
+}
+
+func waitDone(done <-chan struct{}, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+	}
 }
 
 // clearProcess only clears the process generation stopped by the caller. This

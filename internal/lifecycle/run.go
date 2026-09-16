@@ -43,13 +43,13 @@ func run(ctx context.Context, cfg *config.Config, b backend.Backend, extraArgs [
 		return err
 	}
 	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		stopCtx, cancel := context.WithTimeout(context.Background(), backendStopTimeout)
 		defer cancel()
 		_ = b.Stop(stopCtx)
 	}()
 
 	args := append(append([]string{}, cfg.Game.Args...), extraArgs...)
-	cmd := exec.CommandContext(ctx, cfg.Game.Executable, args...)
+	cmd := exec.Command(cfg.Game.Executable, args...)
 	cmd.Dir = cfg.Game.WorkingDirectory
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -66,7 +66,7 @@ func run(ctx context.Context, cfg *config.Config, b backend.Backend, extraArgs [
 	gameDone := make(chan error, 1)
 	go func() { gameDone <- cmd.Wait() }()
 	backendDone := make(chan error, 1)
-	go func() { backendDone <- b.Wait(ctx) }()
+	go func() { backendDone <- b.Wait(context.Background()) }()
 
 	select {
 	case err := <-gameDone:
@@ -75,11 +75,30 @@ func run(ctx context.Context, cfg *config.Config, b backend.Backend, extraArgs [
 		}
 		return nil
 	case err := <-backendDone:
-		_ = cmd.Process.Kill()
-		<-gameDone
+		killAndWait(cmd.Process, gameDone)
 		if err == nil {
 			return fmt.Errorf("gost backend exited unexpectedly")
 		}
 		return fmt.Errorf("gost backend exited: %w", err)
+	case <-ctx.Done():
+		killAndWait(cmd.Process, gameDone)
+		return ctx.Err()
+	}
+}
+
+const (
+	backendStopTimeout = 5 * time.Second
+	childKillWait      = time.Second
+)
+
+func killAndWait(proc *os.Process, done <-chan error) {
+	if proc != nil {
+		_ = proc.Kill()
+	}
+	timer := time.NewTimer(childKillWait)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
 	}
 }

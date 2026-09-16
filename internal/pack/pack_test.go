@@ -90,25 +90,34 @@ func TestWrapAndUnwrap(t *testing.T) {
 }
 
 func TestExtractZipRejectsSlip(t *testing.T) {
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	hdr := &zip.FileHeader{Name: "../evil"}
-	w, err := zw.CreateHeader(hdr)
-	if err != nil {
-		t.Fatal(err)
+	names := []string{"../evil", "foo/../../evil"}
+	if runtime.GOOS == "windows" {
+		names = append(names, `C:\Windows\evil.dll`)
+	} else {
+		names = append(names, "/etc/passwd")
 	}
-	if _, err := w.Write([]byte("nope")); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := extractZip(zr, t.TempDir()); err == nil {
-		t.Fatal("expected zip slip to be rejected")
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			zw := zip.NewWriter(&buf)
+			w, err := zw.CreateHeader(&zip.FileHeader{Name: name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.Write([]byte("nope")); err != nil {
+				t.Fatal(err)
+			}
+			if err := zw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := extractZip(zr, t.TempDir()); err == nil {
+				t.Fatalf("expected zip slip %q to be rejected", name)
+			}
+		})
 	}
 }
 
