@@ -7,6 +7,8 @@ go test ./...
 go build ./cmd/v46lift
 ```
 
+`go test ./internal/pack` covers installer minting, client wrapping, and uninstall.
+
 Keep translation engines behind the backend interface. Application-specific behavior does not belong in the core runtime.
 
 ## Design rules
@@ -16,3 +18,4 @@ Keep translation engines behind the backend interface. Application-specific beha
 3. Keep network privilege in the runtime/service boundary.
 4. Preserve TCP/UDP payloads unchanged.
 5. Prefer explicit, deterministic mappings over protocol sniffing.
+6. Packed launchers must not require the player to pass flags or config paths.

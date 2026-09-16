@@ -4,38 +4,39 @@ package network
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/kargops/v46lift/internal/config"
 )
 
 func TestUpRollsBackAddressesWhenInspectionFails(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "calls")
-	countPath := filepath.Join(dir, "count")
-	script := `#!/bin/sh
-case "$*" in
-  "-o -4 address show dev lo")
-    count=0
-    test ! -f "$IP_COUNT" || count=$(cat "$IP_COUNT")
-    count=$((count + 1))
-    echo "$count" > "$IP_COUNT"
-    test "$count" -lt 2
-    ;;
-  address\ add*|address\ delete*)
-    echo "$*" >> "$IP_LOG"
-    ;;
-esac
-`
-	if err := os.WriteFile(filepath.Join(dir, "ip"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	oldProbe := loopbackHasIPv4Fn
+	oldAdd := addLoopbackIPv4Fn
+	oldDel := delLoopbackIPv4Fn
+	t.Cleanup(func() {
+		loopbackHasIPv4Fn = oldProbe
+		addLoopbackIPv4Fn = oldAdd
+		delLoopbackIPv4Fn = oldDel
+	})
+
+	probeCalls := 0
+	calls := []string{}
+	loopbackHasIPv4Fn = func(ip string) (bool, error) {
+		probeCalls++
+		if probeCalls == 2 {
+			return false, errors.New("inspection failed")
+		}
+		return false, nil
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("IP_LOG", logPath)
-	t.Setenv("IP_COUNT", countPath)
+	addLoopbackIPv4Fn = func(ip string) error {
+		calls = append(calls, "add "+ip)
+		return nil
+	}
+	delLoopbackIPv4Fn = func(ip string) error {
+		calls = append(calls, "del "+ip)
+		return nil
+	}
 
 	m := &linuxManager{}
 	err := m.Up(context.Background(), config.NetworkConfig{
@@ -45,18 +46,10 @@ esac
 	if err == nil {
 		t.Fatal("expected second address inspection to fail")
 	}
-
-	calls, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatal(readErr)
+	if len(calls) != 2 || calls[0] != "add 198.18.0.10" || calls[1] != "del 198.18.0.10" {
+		t.Fatalf("unexpected operation order: %v", calls)
 	}
-	got := string(calls)
-	for _, want := range []string{
-		"address add 198.18.0.10/32 dev lo",
-		"address delete 198.18.0.10/32 dev lo",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected %q in calls:\n%s", want, got)
-		}
+	if len(m.added) != 0 {
+		t.Fatalf("expected rollback to clear tracked addresses, got %v", m.added)
 	}
 }

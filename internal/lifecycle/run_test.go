@@ -48,7 +48,7 @@ func TestRunStopsGameWhenBackendExits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	runDone := make(chan error, 1)
-	go func() { runDone <- run(ctx, cfg, b) }()
+	go func() { runDone <- run(ctx, cfg, b, nil) }()
 
 	select {
 	case err = <-runDone:

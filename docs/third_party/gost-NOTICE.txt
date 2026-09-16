@@ -1,0 +1,8 @@
+This installer may bundle a GOST binary:
+
+  https://github.com/go-gost/gost
+  https://v3.gost.run/
+
+GOST is a separate project with its own license and copyright holders.
+v46lift is MIT-licensed and is not affiliated with GOST.
+When redistributing a minted installer, include this notice and GOST's own license terms.

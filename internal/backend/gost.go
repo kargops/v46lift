@@ -16,11 +16,14 @@ import (
 type Gost struct {
 	binary   string
 	mappings []config.PortMapping
+	logPath  string
+	setupCmd func(*exec.Cmd)
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
 	done    chan struct{}
 	waitErr error
+	logFile *os.File
 }
 
 func NewGost(binary string, mappings []config.PortMapping) *Gost {
@@ -28,6 +31,16 @@ func NewGost(binary string, mappings []config.PortMapping) *Gost {
 		binary:   binary,
 		mappings: append([]config.PortMapping(nil), mappings...),
 	}
+}
+
+func (g *Gost) WithLogPath(path string) *Gost {
+	g.logPath = path
+	return g
+}
+
+func (g *Gost) WithCommandSetup(fn func(*exec.Cmd)) *Gost {
+	g.setupCmd = fn
+	return g
 }
 
 func (g *Gost) args() []string {
@@ -70,11 +83,27 @@ func (g *Gost) Start(ctx context.Context) error {
 	}
 
 	cmd := exec.CommandContext(ctx, g.binary, g.args()...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	cmd.Stdin = nil
+	if g.setupCmd != nil {
+		g.setupCmd(cmd)
+	}
+	if g.logPath != "" {
+		f, err := os.OpenFile(g.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			cmd.Stdout = f
+			cmd.Stderr = f
+			g.logFile = f
+		} else {
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+		}
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
 	if err := cmd.Start(); err != nil {
+		g.closeLogLocked()
 		return fmt.Errorf("start gost: %w", err)
 	}
 	g.cmd = cmd
@@ -143,8 +172,16 @@ func (g *Gost) clearProcess(cmd *exec.Cmd) {
 	if g.cmd == cmd {
 		g.cmd = nil
 		g.done = nil
+		g.closeLogLocked()
 	}
 	g.mu.Unlock()
+}
+
+func (g *Gost) closeLogLocked() {
+	if g.logFile != nil {
+		_ = g.logFile.Close()
+		g.logFile = nil
+	}
 }
 
 func shellishQuote(s string) string {
