@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/kargops/v46lift/internal/backend"
 	"github.com/kargops/v46lift/internal/config"
@@ -27,12 +28,17 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	default:
 		return fmt.Errorf("unsupported backend %q", cfg.Engine.Type)
 	}
+	return run(ctx, cfg, b)
+}
 
+func run(ctx context.Context, cfg *config.Config, b backend.Backend) error {
 	if err := b.Start(ctx); err != nil {
 		return err
 	}
 	defer func() {
-		_ = b.Stop(context.Background())
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = b.Stop(stopCtx)
 	}()
 
 	cmd := exec.CommandContext(ctx, cfg.Game.Executable, cfg.Game.Args...)
@@ -45,8 +51,23 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("start game: %w", err)
 	}
 
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("game exited with error: %w", err)
+	gameDone := make(chan error, 1)
+	go func() { gameDone <- cmd.Wait() }()
+	backendDone := make(chan error, 1)
+	go func() { backendDone <- b.Wait(ctx) }()
+
+	select {
+	case err := <-gameDone:
+		if err != nil {
+			return fmt.Errorf("game exited with error: %w", err)
+		}
+		return nil
+	case err := <-backendDone:
+		_ = cmd.Process.Kill()
+		<-gameDone
+		if err == nil {
+			return fmt.Errorf("gost backend exited unexpectedly")
+		}
+		return fmt.Errorf("gost backend exited: %w", err)
 	}
-	return nil
 }

@@ -28,6 +28,7 @@ func (m *linuxManager) Up(ctx context.Context, cfg config.NetworkConfig) error {
 	for _, ip := range cfg.SyntheticIPs {
 		present, err := loopbackHasIPv4(ctx, ip)
 		if err != nil {
+			_ = m.Down(context.Background())
 			return err
 		}
 		if present {

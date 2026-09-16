@@ -17,8 +17,10 @@ type Gost struct {
 	binary   string
 	mappings []config.PortMapping
 
-	mu  sync.Mutex
-	cmd *exec.Cmd
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	done    chan struct{}
+	waitErr error
 }
 
 func NewGost(binary string, mappings []config.PortMapping) *Gost {
@@ -76,23 +78,73 @@ func (g *Gost) Start(ctx context.Context) error {
 		return fmt.Errorf("start gost: %w", err)
 	}
 	g.cmd = cmd
+	g.done = make(chan struct{})
+	g.waitErr = nil
+	go func() {
+		err := cmd.Wait()
+		g.mu.Lock()
+		g.waitErr = err
+		close(g.done)
+		g.mu.Unlock()
+	}()
 	return nil
+}
+
+func (g *Gost) Wait(ctx context.Context) error {
+	g.mu.Lock()
+	done := g.done
+	g.mu.Unlock()
+	if done == nil {
+		return nil
+	}
+
+	select {
+	case <-done:
+		g.mu.Lock()
+		err := g.waitErr
+		g.mu.Unlock()
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (g *Gost) Stop(ctx context.Context) error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	cmd := g.cmd
+	done := g.done
+	g.mu.Unlock()
 
-	if g.cmd == nil || g.cmd.Process == nil {
+	if cmd == nil || cmd.Process == nil || done == nil {
 		return nil
 	}
 
-	if err := g.cmd.Process.Signal(os.Interrupt); err != nil {
-		_ = g.cmd.Process.Kill()
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		_ = cmd.Process.Kill()
 	}
-	_, _ = g.cmd.Process.Wait()
-	g.cmd = nil
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		<-done
+		g.clearProcess(cmd)
+		return fmt.Errorf("stop gost: %w", ctx.Err())
+	}
+
+	g.clearProcess(cmd)
 	return nil
+}
+
+// clearProcess only clears the process generation stopped by the caller. This
+// keeps a delayed, concurrent Stop from clearing a later successful Start.
+func (g *Gost) clearProcess(cmd *exec.Cmd) {
+	g.mu.Lock()
+	if g.cmd == cmd {
+		g.cmd = nil
+		g.done = nil
+	}
+	g.mu.Unlock()
 }
 
 func shellishQuote(s string) string {
