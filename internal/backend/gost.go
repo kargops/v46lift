@@ -16,9 +16,11 @@ import (
 type Gost struct {
 	binary   string
 	mappings []config.PortMapping
+	logPath  string
 
-	mu  sync.Mutex
-	cmd *exec.Cmd
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	logFile *os.File
 }
 
 func NewGost(binary string, mappings []config.PortMapping) *Gost {
@@ -26,6 +28,11 @@ func NewGost(binary string, mappings []config.PortMapping) *Gost {
 		binary:   binary,
 		mappings: append([]config.PortMapping(nil), mappings...),
 	}
+}
+
+func (g *Gost) WithLogPath(path string) *Gost {
+	g.logPath = path
+	return g
 }
 
 func (g *Gost) args() []string {
@@ -68,11 +75,24 @@ func (g *Gost) Start(ctx context.Context) error {
 	}
 
 	cmd := exec.CommandContext(ctx, g.binary, g.args()...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	cmd.Stdin = nil
+	if g.logPath != "" {
+		f, err := os.OpenFile(g.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			cmd.Stdout = f
+			cmd.Stderr = f
+			g.logFile = f
+		} else {
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+		}
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
 	if err := cmd.Start(); err != nil {
+		g.closeLog()
 		return fmt.Errorf("start gost: %w", err)
 	}
 	g.cmd = cmd
@@ -92,7 +112,15 @@ func (g *Gost) Stop(ctx context.Context) error {
 	}
 	_, _ = g.cmd.Process.Wait()
 	g.cmd = nil
+	g.closeLog()
 	return nil
+}
+
+func (g *Gost) closeLog() {
+	if g.logFile != nil {
+		_ = g.logFile.Close()
+		g.logFile = nil
+	}
 }
 
 func shellishQuote(s string) string {
