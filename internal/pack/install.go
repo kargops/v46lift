@@ -273,17 +273,13 @@ func pathInside(path, dir string) bool {
 
 func extractZip(zr *zip.Reader, dest string) error {
 	dest = filepath.Clean(dest)
+	destPrefix := dest + string(os.PathSeparator)
 	for _, f := range zr.File {
-		rel := filepath.Clean(filepath.FromSlash(f.Name))
-		if rel == "." || rel == string(filepath.Separator) {
+		if f.Name == "" {
 			continue
 		}
-		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("invalid installer path %q", f.Name)
-		}
-		target := filepath.Join(dest, rel)
-		targetRel, err := filepath.Rel(dest, target)
-		if err != nil || targetRel == ".." || strings.HasPrefix(targetRel, ".."+string(os.PathSeparator)) {
+		target := filepath.Clean(filepath.Join(dest, filepath.FromSlash(f.Name)))
+		if target != dest && !strings.HasPrefix(target, destPrefix) {
 			return fmt.Errorf("invalid installer path %q", f.Name)
 		}
 		if f.FileInfo().IsDir() {
