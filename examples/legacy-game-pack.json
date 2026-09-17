@@ -1,0 +1,39 @@
+{
+  "pack": {
+    "name": "legacy-game",
+    "display_name": "Legacy Game"
+  },
+  "game": {
+    "executable": "/opt/legacy-game/game",
+    "args": [],
+    "working_directory": "/opt/legacy-game"
+  },
+  "engine": {
+    "type": "gost",
+    "binary": "gost"
+  },
+  "network": {
+    "manage_synthetic_ips": true,
+    "synthetic_ips": [
+      "198.18.0.10"
+    ]
+  },
+  "mappings": [
+    {
+      "protocol": "tcp",
+      "listen_ip": "198.18.0.10",
+      "listen_port": 27015,
+      "target_host": "2001:db8:42::10",
+      "target_port": 27015
+    },
+    {
+      "protocol": "udp",
+      "listen_ip": "198.18.0.10",
+      "listen_port": 27015,
+      "target_host": "2001:db8:42::10",
+      "target_port": 27015,
+      "udp_keepalive": true,
+      "udp_ttl": "2m"
+    }
+  ]
+}

@@ -90,6 +90,39 @@ privileged v46liftd
 
 The launcher owns the application lifecycle; the daemon owns only networking.
 
+Minted installers currently approximate this without a daemon. The player-facing
+file is the original client path, replaced with a `v46lift` shim that already
+contains the mapping. On Linux the shim may hold `CAP_NET_ADMIN` and applies
+addresses in-process via netlink so the capability is not lost across `exec`.
+The parent keeps that capability until teardown; GOST and the original client
+(`*.v46lift-real`) are started unprivileged and do not inherit it.
+
+## Packaging
+
+Operators mint a single installer with `v46lift pack`:
+
+```text
+operator machine
+  mapping JSON + gost + vendor setup + v46lift
+                    |
+                    v
+            minted installer
+                    |
+                    v
+player machine (one elevation prompt)
+  +-- install bundled lift + gost
+  +-- run vendor client installer
+  +-- replace client binary with baked launcher
+                    |
+                    v
+player starts the game as usual
+  +-- baked launcher starts gost
+  +-- original client runs unprivileged
+  +-- teardown when the client exits
+```
+
+The mapping is a trailer on the launcher binary, not a file the player points at.
+
 ## Process lifetime
 
 A future Windows implementation should use Job Objects so launchers/updaters that spawn a second process do not cause premature teardown.
