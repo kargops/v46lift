@@ -16,10 +16,10 @@ const (
 )
 
 func setLaunchCaps(path string) error {
-	if err := setCapabilityXattr(path, unix.CAP_NET_ADMIN, unix.CAP_NET_BIND_SERVICE); err == nil {
+	if err := setCapabilityXattr(path, unix.CAP_NET_ADMIN); err == nil {
 		return nil
 	} else if setcap, lookErr := exec.LookPath("setcap"); lookErr == nil {
-		cmd := exec.Command(setcap, "cap_net_admin,cap_net_bind_service=ep", path)
+		cmd := exec.Command(setcap, "cap_net_admin=ep", path)
 		if out, runErr := cmd.CombinedOutput(); runErr != nil {
 			return fmt.Errorf("grant launch capabilities: %w: %s", runErr, string(out))
 		}

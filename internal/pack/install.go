@@ -233,6 +233,9 @@ func parseManifest(raw []byte) (Manifest, error) {
 }
 
 func moveSelfOutOfInstallDir(installDir string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -249,16 +252,24 @@ func moveSelfOutOfInstallDir(installDir string) error {
 		return nil
 	}
 
-	tmp, err := os.MkdirTemp("", "v46lift-uninstall-*")
-	if err != nil {
-		return err
-	}
-	dest := filepath.Join(tmp, filepath.Base(self))
+	// Same-volume sibling of the install directory. os.TempDir() is often
+	// another filesystem, and rename then fails with EXDEV.
+	parent := filepath.Dir(installDir)
+	dest := filepath.Join(parent, "."+filepath.Base(self)+".v46lift-uninst")
+	_ = os.Remove(dest)
 	if err := os.Rename(self, dest); err != nil {
-		_ = os.RemoveAll(tmp)
 		return fmt.Errorf("move uninstaller out of %s: %w", installDir, err)
 	}
 	return nil
+}
+
+func wrapInsideInstallDir(wrapPath, installDir string) bool {
+	wrapPath = filepath.Clean(wrapPath)
+	installDir = filepath.Clean(installDir)
+	if installDir == "" || wrapPath == "" {
+		return false
+	}
+	return pathInside(wrapPath, installDir) || pathInside(RealPath(wrapPath), installDir)
 }
 
 func pathInside(path, dir string) bool {

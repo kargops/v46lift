@@ -74,6 +74,9 @@ func BuildInstaller(opts Options) (string, error) {
 	if strings.TrimSpace(opts.WrapPath) == "" {
 		return "", fmt.Errorf("wrap path is required: set game.executable or --wrap to the binary players actually launch (not the vendor setup program)")
 	}
+	if wrapInsideInstallDir(opts.WrapPath, opts.InstallDir) {
+		return "", fmt.Errorf("install-dir %s must not contain the wrapped client %s; uninstall would delete the game", opts.InstallDir, opts.WrapPath)
+	}
 	if opts.GostBinary == "" {
 		return "", fmt.Errorf("a GOST binary is required to mint a seamless installer; pass --gost")
 	}

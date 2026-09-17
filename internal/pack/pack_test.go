@@ -307,6 +307,43 @@ func TestPathInside(t *testing.T) {
 	}
 }
 
+func TestWrapInsideInstallDir(t *testing.T) {
+	install := filepath.Join("/opt", "v46lift", "legacy-game")
+	if !wrapInsideInstallDir(filepath.Join(install, "game"), install) {
+		t.Fatal("client inside install dir should be rejected")
+	}
+	if wrapInsideInstallDir(filepath.Join("/opt", "legacy-game", "game"), install) {
+		t.Fatal("client outside install dir should be allowed")
+	}
+}
+
+func TestBuildInstallerRejectsOverlappingInstallDir(t *testing.T) {
+	dir := t.TempDir()
+	lift := filepath.Join(dir, "v46lift"+exeSuffix())
+	gost := filepath.Join(dir, "gost"+exeSuffix())
+	if err := os.WriteFile(lift, []byte("FAKELIFT"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gost, []byte("FAKEGOST"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	installDir := filepath.Join(dir, "opt", "legacy-game")
+	wrap := filepath.Join(installDir, "game"+exeSuffix())
+	_, err := BuildInstaller(Options{
+		Config:     sampleConfig(wrap),
+		LiftBinary: lift,
+		GostBinary: gost,
+		Output:     filepath.Join(dir, "setup"+exeSuffix()),
+		Name:       "legacy-game",
+		InstallDir: installDir,
+		WrapPath:   wrap,
+		SetCaps:    BoolPtr(false),
+	})
+	if err == nil {
+		t.Fatal("expected overlapping install-dir and wrap path to be rejected")
+	}
+}
+
 func TestMaybeElevateSkipped(t *testing.T) {
 	handedOff, err := maybeElevate(false)
 	if handedOff || err != nil {

@@ -21,6 +21,19 @@ func TestValidMapping(t *testing.T) {
 	}
 }
 
+func TestRejectPrivilegedListenPort(t *testing.T) {
+	m := PortMapping{
+		Protocol:   "tcp",
+		ListenIP:   "198.18.0.10",
+		ListenPort: 80,
+		TargetHost: "2001:db8::10",
+		TargetPort: 80,
+	}
+	if err := m.Validate(); err == nil {
+		t.Fatal("expected privileged listen port to be rejected")
+	}
+}
+
 func TestRejectInvalidProtocol(t *testing.T) {
 	m := PortMapping{
 		Protocol:   "sctp",

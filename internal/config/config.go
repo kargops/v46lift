@@ -182,8 +182,8 @@ func (m PortMapping) Validate() error {
 	if ip == nil || ip.To4() == nil {
 		return fmt.Errorf("listen_ip must be an IPv4 address")
 	}
-	if m.ListenPort < 1 || m.ListenPort > 65535 {
-		return fmt.Errorf("listen_port must be 1..65535")
+	if m.ListenPort < 1024 || m.ListenPort > 65535 {
+		return fmt.Errorf("listen_port must be 1024..65535; GOST runs unprivileged and cannot bind privileged ports")
 	}
 	if m.TargetHost == "" {
 		return fmt.Errorf("target_host is required")

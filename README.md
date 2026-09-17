@@ -131,6 +131,8 @@ See [`examples/legacy-game.json`](examples/legacy-game.json) and [`examples/lega
 
 Packed launchers load this JSON from an embedded payload. Unpackaged development still accepts `--config`, `V46LIFT_CONFIG`, or a `config.json` next to the binary.
 
+Listen ports must be 1024 or higher. GOST runs unprivileged and cannot bind privileged ports.
+
 ## Developer usage
 
 ```bash
@@ -208,7 +210,7 @@ v46liftd (privileged)
 game process (user)
 ```
 
-The current minted installer approximates that without a daemon: the shim may carry `CAP_NET_ADMIN` to manage synthetic addresses, then drops privilege before the game starts. The game should never run elevated.
+The current minted installer approximates that without a daemon: the shim may carry `CAP_NET_ADMIN` to manage synthetic addresses in-process, and it keeps that capability until teardown. GOST and the game start unprivileged and do not inherit it.
 
 ## License
 
