@@ -9,9 +9,15 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kargops/v46lift/internal/config"
 )
+
+// forceKillWait is how long Stop waits for cmd.Wait after Kill. If the child
+// is stuck (for example in uninterruptible kernel I/O), Stop returns anyway
+// so callers can tear down the rest of the runtime.
+const forceKillWait = time.Second
 
 type Gost struct {
 	binary   string
@@ -21,6 +27,8 @@ type Gost struct {
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
+	done    chan struct{}
+	waitErr error
 	logFile *os.File
 }
 
@@ -73,6 +81,10 @@ func (g *Gost) CommandLine() string {
 }
 
 func (g *Gost) Start(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -80,7 +92,9 @@ func (g *Gost) Start(ctx context.Context) error {
 		return fmt.Errorf("gost backend already started")
 	}
 
-	cmd := exec.CommandContext(ctx, g.binary, g.args()...)
+	// Command, not CommandContext: Stop owns shutdown. Binding the child to
+	// the parent context would SIGKILL it on cancel and race graceful stop.
+	cmd := exec.Command(g.binary, g.args()...)
 	cmd.Stdin = nil
 	if g.setupCmd != nil {
 		g.setupCmd(cmd)
@@ -101,31 +115,94 @@ func (g *Gost) Start(ctx context.Context) error {
 	}
 
 	if err := cmd.Start(); err != nil {
-		g.closeLog()
+		g.closeLogLocked()
 		return fmt.Errorf("start gost: %w", err)
 	}
 	g.cmd = cmd
+	done := make(chan struct{})
+	g.done = done
+	g.waitErr = nil
+	go func() {
+		err := cmd.Wait()
+		g.mu.Lock()
+		if g.cmd == cmd || g.cmd == nil {
+			g.waitErr = err
+		}
+		close(done)
+		g.mu.Unlock()
+	}()
 	return nil
+}
+
+func (g *Gost) Wait(ctx context.Context) error {
+	g.mu.Lock()
+	done := g.done
+	waitErr := g.waitErr
+	g.mu.Unlock()
+	if done == nil {
+		return waitErr
+	}
+
+	select {
+	case <-done:
+		g.mu.Lock()
+		err := g.waitErr
+		g.mu.Unlock()
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (g *Gost) Stop(ctx context.Context) error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	cmd := g.cmd
+	done := g.done
+	g.mu.Unlock()
 
-	if g.cmd == nil || g.cmd.Process == nil {
+	if cmd == nil || cmd.Process == nil || done == nil {
 		return nil
 	}
 
-	if err := g.cmd.Process.Signal(os.Interrupt); err != nil {
-		_ = g.cmd.Process.Kill()
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		_ = cmd.Process.Kill()
 	}
-	_, _ = g.cmd.Process.Wait()
-	g.cmd = nil
-	g.closeLog()
-	return nil
+
+	select {
+	case <-done:
+		g.clearProcess(cmd)
+		return nil
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+	}
+
+	waitDone(done, forceKillWait)
+	g.clearProcess(cmd)
+	return fmt.Errorf("stop gost: %w", ctx.Err())
 }
 
-func (g *Gost) closeLog() {
+func waitDone(done <-chan struct{}, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+	}
+}
+
+// clearProcess only clears the process generation stopped by the caller. This
+// keeps a delayed, concurrent Stop from clearing a later successful Start.
+func (g *Gost) clearProcess(cmd *exec.Cmd) {
+	g.mu.Lock()
+	if g.cmd == cmd {
+		g.cmd = nil
+		g.done = nil
+		g.closeLogLocked()
+	}
+	g.mu.Unlock()
+}
+
+func (g *Gost) closeLogLocked() {
 	if g.logFile != nil {
 		_ = g.logFile.Close()
 		g.logFile = nil
